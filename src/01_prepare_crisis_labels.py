@@ -29,7 +29,7 @@ PANEL_24 = [
     "Kenya", "Ukraine", "Uruguay", "Viet Nam",
 ]
 
-# The IMF source spells these differently than our panel / World Bank convention
+
 NAME_MAP = {"Türkiye": "Turkey", "Vietnam": "Viet Nam"}
 
 # Starts at 1971, not 1970: every feature is lagged by 1 year (uses year t-1
