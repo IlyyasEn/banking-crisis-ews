@@ -11,8 +11,12 @@ Crisis EWS built on the same methodology.
 src/01_prepare_crisis_labels.py   -> crisis onset labels (Laeven & Valencia)
 src/02_merge_indicators.py        -> merge macro indicators, apply 1-year lag
 src/03_build_folds.py             -> crisis-balanced country folds for CV
+src/04_download_candidate_features.py -> download banking/external feature candidates
+src/05_build_extended_panel.py    -> coverage-audited enriched candidate panel
 models/04_train_tabular_models.py -> LogReg, RF, XGBoost, LightGBM (nested CV)
 models/05_train_lstm.py           -> LSTM (nested CV)
+models/06_lightgbm_diagnostics.py -> threshold tuning + SHAP explainability
+models/07_evaluate_extended_features.py -> baseline vs external-vulnerability test
 ```
 
 Run in order from the repo root:
@@ -22,9 +26,17 @@ pip install -r requirements.txt
 python src/01_prepare_crisis_labels.py
 python src/02_merge_indicators.py
 python src/03_build_folds.py
+python src/04_download_candidate_features.py
+python src/05_build_extended_panel.py
 python models/04_train_tabular_models.py
 python models/05_train_lstm.py
+python models/06_lightgbm_diagnostics.py
+python models/07_evaluate_extended_features.py
+python scripts/create_project_summary_pdf.py
 ```
+
+The final command writes a three-page project summary to
+`output/pdf/banking_crisis_ews_summary.pdf`.
 
 ## Data
 
@@ -95,22 +107,77 @@ the model rather than helped it.
 
 | Model | AUC | PR-AUC |
 |---|---|---|
-| LSTM | 0.646 ± 0.052 | 0.119 ± 0.063 |
-| LightGBM | 0.670 ± 0.068 | 0.110 ± 0.050 |
-| Logistic Regression | 0.621 ± 0.126 | 0.108 ± 0.064 |
-| XGBoost | 0.654 ± 0.091 | 0.098 ± 0.038 |
-| Random Forest | 0.611 ± 0.090 | 0.088 ± 0.042 |
-| Basel III benchmark (credit-to-GDP level) | 0.522 ± 0.035 | 0.056 ± 0.022 |
+| LSTM | 0.664 +/- 0.083 | 0.112 +/- 0.024 |
+| Logistic Regression | 0.614 +/- 0.159 | 0.103 +/- 0.056 |
+| Random Forest | 0.585 +/- 0.069 | 0.091 +/- 0.056 |
+| XGBoost | 0.590 +/- 0.072 | 0.057 +/- 0.026 |
+| Basel III benchmark (credit-to-GDP level) | 0.547 +/- 0.077 | 0.051 +/- 0.015 |
+| LightGBM | 0.571 +/- 0.081 | 0.048 +/- 0.011 |
 
-Random-guess PR-AUC at this crisis prevalence (~3.5%) is ~0.035, so every
-model meaningfully beats both random guessing and the simple Basel III
-rule. LSTM and LightGBM are close leaders; the gap between them is small
-relative to the standard deviation given only 46 total crisis events, so
-neither should be over-claimed as definitively best.
+Random-guess PR-AUC at this crisis prevalence (~3.5%) is ~0.035. The LSTM
+has the strongest observed discrimination, followed by logistic regression;
+both clear the credit-to-GDP benchmark. The current LightGBM configuration
+does not beat that benchmark on PR-AUC, despite its useful diagnostic value,
+so it should not be presented as the production choice without further
+tuning. With only 46 onset events and high feature missingness (10-55%),
+these results are screening evidence rather than a deployable policy rule.
 
-## Next steps
+## Diagnostics
 
-- SHAP feature importance on the best-performing model
-- Decision threshold selection (tuned on inner validation, not test folds)
+`models/06_lightgbm_diagnostics.py` adds threshold and explainability
+diagnostics for a fixed LightGBM reference configuration:
+
+- `results/lightgbm_threshold_diagnostics.csv`: inner-validation F2 threshold
+  tuning, applied once to each untouched outer test fold.
+- `results/lightgbm_shap_importance.csv`: mean absolute SHAP feature
+  importance across the outer test folds.
+
+Current LightGBM threshold diagnostics are intentionally recall-oriented
+(`beta=2`): average test recall is about 67.5%, precision is about 4.1%,
+and the average alert rate is about 57.3%. That is a reasonable screening
+posture for rare crisis onsets, but it is not a standalone policy rule.
+
+Top SHAP drivers in the current run are inflation, exchange-rate
+depreciation, credit-to-GDP, and current account balance.
+
+## Feature Enrichment Screen
+
+The project now downloads five candidate features directly from the official
+World Bank API and applies the same one-year lag before assessing their
+coverage at the 46 crisis onsets:
+
+- Bank capital-to-assets and the NPL ratio are economically relevant but each
+  currently covers only 13.0% of crisis onsets. They are retained as raw
+  candidates and excluded from modeling; imputing them would turn missingness
+  into a misleading signal.
+- Net barter terms of trade covers 19.6% of crisis onsets and is likewise
+  excluded for now.
+- External debt service relative to exports covers 73.9% of crisis onsets.
+  The reserves-to-short-term-external-debt ratio covers 69.6%. Together they
+  form the external-vulnerability candidate extension. The Fed Funds rate is
+  a documented next candidate once a local FRED export is supplied.
+
+The candidate LightGBM extension improved AUC from 0.571 to 0.606 and PR-AUC
+from 0.048 to 0.059. This is encouraging but small relative to fold-to-fold
+variation, so the baseline LSTM result remains the project leader and the
+extension remains experimental. See `results/candidate_feature_coverage.csv`
+and `results/extended_feature_cv_results.csv` for the full evidence.
+
+World Bank indicator codes: `FB.BNK.CAPA.ZS` (capital/assets),
+`FB.AST.NPER.ZS` (NPL ratio), `DT.TDS.DECT.EX.ZS` (debt service/exports),
+`TT.PRI.MRCH.XD.WD` (terms of trade), `FI.RES.TOTL.CD` (reserves), and
+`DT.DOD.DSTC.CD` (short-term external debt). A future global-financial
+extension can add `FEDFUNDS` from the Federal Reserve Board via FRED.
+
+## Remaining extension
+
+The candidate-feature enrichment reports current coverage in
+`results/candidate_feature_coverage.csv`. NPL and capital ratios are retained
+in the raw candidate extract but excluded from modeling because they cover
+only about 13% of crisis onsets; adding them would mostly measure missingness
+rather than financial fragility.
+
+## Remaining extension
+
 - Twin-crisis analysis: does an active currency crisis predict banking
-  crisis onset, linking this project to the companion Currency Crisis EWS
+  crisis onset, linking this project to the companion Currency Crisis EWS.

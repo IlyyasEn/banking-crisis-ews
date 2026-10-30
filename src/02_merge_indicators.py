@@ -70,6 +70,19 @@ def main():
     indicators = load_wb_indicators()
     fx = pd.read_csv(FX_RAW_PATH)
 
+    crisis = pd.read_csv(CRISIS_PATH)
+    expected_countries = set(crisis["country"])
+    indicator_countries = set(indicators["country"])
+    missing_indicator_countries = sorted(expected_countries - indicator_countries)
+    if missing_indicator_countries:
+        raise ValueError(
+            "World Bank input does not cover every panel country. Re-export the "
+            "indicator workbook before regenerating the model-ready panel. "
+            f"Missing: {', '.join(missing_indicator_countries)}"
+        )
+
+    fx["prediction_year"] = fx["prediction_year"] + 1
+
     feature_cols_wb = list(RENAME_MAP.values())
 
     # Apply 1-year lag: year t's crisis label pairs with year (t-1)'s indicators
@@ -78,7 +91,6 @@ def main():
     lagged = lagged.drop(columns=["year"])
     lagged = lagged.rename(columns={c: c + "_t_minus_1" for c in feature_cols_wb})
 
-    crisis = pd.read_csv(CRISIS_PATH)
     final = crisis.merge(lagged, on=["country", "prediction_year"], how="left")
     final = final.merge(fx, on=["country", "prediction_year"], how="left")
 

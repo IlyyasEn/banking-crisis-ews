@@ -14,9 +14,12 @@ cross-sectional fallback for leading gaps.
 Output: results/lstm_cv_results.csv
 """
 
+import os
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
+
 import pandas as pd
 import numpy as np
-import sys, os
+import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from utils import fold_safe_fill, FEATURE_COLS, TARGET
 
@@ -74,8 +77,10 @@ def main():
         n_inner_val = max(1, len(shuffled) // 5)
         inner_val_c, inner_train_c = shuffled[:n_inner_val], shuffled[n_inner_val:]
 
-        inner_train_df = fold_safe_fill(train_all_df, train_all_df[train_all_df["country"].isin(inner_train_c)], FEATURE_COLS)
-        inner_val_df = fold_safe_fill(train_all_df, train_all_df[train_all_df["country"].isin(inner_val_c)], FEATURE_COLS)
+        inner_train_raw = train_all_df[train_all_df["country"].isin(inner_train_c)]
+        inner_val_raw = train_all_df[train_all_df["country"].isin(inner_val_c)]
+        inner_train_df = fold_safe_fill(inner_train_raw, inner_train_raw, FEATURE_COLS)
+        inner_val_df = fold_safe_fill(inner_train_raw, inner_val_raw, FEATURE_COLS)
 
         scaler = StandardScaler().fit(inner_train_df[FEATURE_COLS])
         itr_s = inner_train_df.copy(); itr_s[FEATURE_COLS] = scaler.transform(inner_train_df[FEATURE_COLS])

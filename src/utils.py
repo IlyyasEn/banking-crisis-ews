@@ -31,35 +31,54 @@ def clean_year(val):
 
 def fold_safe_impute(train_df, apply_df, cols):
     """
-    Expanding, past-only imputation strategy for tabular models
-    (Logistic Regression, Random Forest).
+    Past-only imputation strategy for tabular models (Logistic Regression,
+    Random Forest).
 
-    - Country-level median is computed ONLY from `train_df`.
-    - Any still-missing value falls back to the same-year median computed
-      across all TRAIN countries (never touching test-fold countries).
-    - Final fallback is the global train-only median.
+    - A missing value first uses an earlier observed value from the same
+      country. This is safe for held-out countries because it uses only that
+      country's history available at prediction time.
+    - Remaining gaps fall back to the same-year median across TRAIN countries
+      only (never touching validation/test countries).
+    - The final fallback is a train-only expanding median, so future years
+      cannot fill an earlier missing value.
+    - If no historical data exists at all (the earliest panel years), use 0.0
+      as an explicit no-information placeholder rather than borrowing from a
+      future year. Models that need dense inputs can therefore run without
+      introducing look-ahead bias.
 
     train_df : DataFrame used to compute all fill statistics (must exclude
                the current outer test fold's countries).
     apply_df : DataFrame the fill is applied to (can be train or test).
     cols     : list of feature columns to impute.
     """
-    out = apply_df.copy()
-    year_medians = train_df.groupby("prediction_year")[cols].median()
-    global_medians = train_df[cols].median()
-
+    out = apply_df.sort_values(["country", "prediction_year"]).copy()
+    train = train_df.sort_values(["country", "prediction_year"]).copy()
     for col in cols:
-        country_med = train_df.groupby("country")[col].median()
-        out[col] = out.apply(
-            lambda r: r[col] if pd.notna(r[col]) else country_med.get(r["country"], np.nan),
-            axis=1,
-        )
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+        train[col] = pd.to_numeric(train[col], errors="coerce")
+        year_medians = train.loc[train[col].notna()].groupby("prediction_year")[col].median()
+        global_by_year = year_medians.expanding().median()
+        # Add training history before the rows being filled. If a country is
+        # present in both frames, sorting keeps only earlier/same-year values
+        # available to the current row; if it is held out, only its own past
+        # observations are available.
+        history = pd.concat(
+            [
+                train[["country", "prediction_year", col]].assign(_apply_row=-1, _source=0),
+                out[["country", "prediction_year", col]].assign(_apply_row=np.arange(len(out)), _source=1),
+            ],
+            ignore_index=True,
+        ).sort_values(["country", "prediction_year", "_source"])
+        history["_filled"] = history.groupby("country")[col].ffill()
+        filled = history.loc[history["_source"] == 1].sort_values("_apply_row")["_filled"].to_numpy()
+        out[col] = pd.Series(filled, index=out.index, dtype=float)
         still_na = out[col].isna()
         if still_na.any():
-            out.loc[still_na, col] = out.loc[still_na, "prediction_year"].map(year_medians[col])
+            out.loc[still_na, col] = out.loc[still_na, "prediction_year"].map(year_medians)
         still_na = out[col].isna()
         if still_na.any():
-            out.loc[still_na, col] = global_medians[col]
+            out.loc[still_na, col] = out.loc[still_na, "prediction_year"].map(global_by_year)
+        out[col] = out[col].fillna(0.0)
     return out
 
 
@@ -71,20 +90,23 @@ def fold_safe_fill(train_df, apply_df, cols):
       country's own earlier years only (never backward-filled from the
       future).
     - Leading gaps (no prior value exists yet) fall back to the same-year
-      median across TRAIN countries only.
+      median across TRAIN countries only, then an expanding train-only median.
+      If neither exists in the earliest years, the final no-information
+      placeholder is 0.0 rather than a future-derived statistic.
     """
     out = apply_df.sort_values(["country", "prediction_year"]).copy()
-    year_medians = train_df.groupby("prediction_year")[cols].median()
-    global_medians = train_df[cols].median()
-
     for col in cols:
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+        year_medians = train_df.loc[train_df[col].notna()].groupby("prediction_year")[col].median()
+        global_by_year = year_medians.expanding().median()
         out[col] = out.groupby("country")[col].transform(lambda x: x.ffill())
         still_na = out[col].isna()
         if still_na.any():
-            out.loc[still_na, col] = out.loc[still_na, "prediction_year"].map(year_medians[col])
+            out.loc[still_na, col] = out.loc[still_na, "prediction_year"].map(year_medians)
         still_na = out[col].isna()
         if still_na.any():
-            out.loc[still_na, col] = global_medians[col]
+            out.loc[still_na, col] = out.loc[still_na, "prediction_year"].map(global_by_year)
+        out[col] = out[col].fillna(0.0)
     return out
 
 

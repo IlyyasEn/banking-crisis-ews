@@ -16,6 +16,7 @@ Output: data/processed/country_fold_assignments.csv
 
 import pandas as pd
 import os
+from banking_ews.validation.folds import build_balanced_country_folds
 
 IN_PATH = "data/processed/banking_crisis_model_ready.csv"
 OUT_PATH = "data/processed/country_fold_assignments.csv"
@@ -25,25 +26,14 @@ N_FOLDS = 6
 def main():
     df = pd.read_csv(IN_PATH)
     crisis_per_country = df.groupby("country")["crisis_t"].sum().sort_values(ascending=False)
-
-    folds = [[] for _ in range(N_FOLDS)]
-    fold_totals = [0] * N_FOLDS
-
-    # Greedy: assign each country (largest crisis count first) to whichever
-    # fold currently has the lowest crisis total.
-    for country, n_crisis in crisis_per_country.items():
-        min_fold = fold_totals.index(min(fold_totals))
-        folds[min_fold].append(country)
-        fold_totals[min_fold] += n_crisis
-
-    fold_map = {c: i for i, countries in enumerate(folds) for c in countries}
-    fold_df = pd.DataFrame(list(fold_map.items()), columns=["country", "fold"])
+    fold_df = build_balanced_country_folds(df, n_folds=N_FOLDS)
 
     os.makedirs("data/processed", exist_ok=True)
     fold_df.to_csv(OUT_PATH, index=False)
 
     print(f"Saved {OUT_PATH}")
-    for i, countries in enumerate(folds):
+    for i in range(N_FOLDS):
+        countries = fold_df.loc[fold_df["fold"] == i, "country"].tolist()
         total = sum(crisis_per_country[c] for c in countries)
         print(f"  Fold {i}: {countries} -> {total} crisis onsets")
 

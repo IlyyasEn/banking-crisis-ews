@@ -1,0 +1,6 @@
+feature,panel_coverage_pct,crisis_onset_coverage_pct,countries_with_data
+external_debt_service_exports_t_minus_1,59.24242424242424,73.91304347826086,17
+reserves_to_short_term_debt_t_minus_1,61.36363636363637,69.56521739130434,16
+net_barter_terms_of_trade_t_minus_1,34.84848484848485,19.565217391304348,23
+bank_capital_to_assets_t_minus_1,30.454545454545457,13.043478260869565,23
+nonperforming_loans_ratio_t_minus_1,30.075757575757578,13.043478260869565,22

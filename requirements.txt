@@ -5,3 +5,5 @@ xgboost
 lightgbm
 tensorflow-cpu
 openpyxl
+shap
+reportlab

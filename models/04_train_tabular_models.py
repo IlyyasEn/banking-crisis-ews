@@ -22,15 +22,20 @@ Models:
 Output: results/nested_cv_results.csv
 """
 
+import os
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
+
 import pandas as pd
 import numpy as np
-import sys, os
+import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from utils import fold_safe_impute, FEATURE_COLS, TARGET
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 import xgboost as xgb
 import lightgbm as lgb
 import warnings
@@ -64,15 +69,19 @@ def scale_pos_weight(y):
 def fit_predict(model_name, params, Xtr, ytr, Xval):
     spw = scale_pos_weight(ytr)
     if model_name == "LogReg":
-        m = LogisticRegression(penalty="l1", solver="liblinear", class_weight="balanced",
-                                max_iter=1000, **params)
+        m = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(
+                penalty="l1", solver="liblinear", class_weight="balanced", max_iter=1000, **params
+            ),
+        )
     elif model_name == "RandomForest":
-        m = RandomForestClassifier(class_weight="balanced", random_state=42, **params)
+        m = RandomForestClassifier(class_weight="balanced", n_jobs=1, random_state=42, **params)
     elif model_name == "XGBoost":
         m = xgb.XGBClassifier(scale_pos_weight=spw, eval_metric="aucpr", random_state=42,
-                               verbosity=0, **params)
+                               n_jobs=1, verbosity=0, **params)
     elif model_name == "LightGBM":
-        m = lgb.LGBMClassifier(scale_pos_weight=spw, random_state=42, verbosity=-1, **params)
+        m = lgb.LGBMClassifier(scale_pos_weight=spw, n_jobs=1, random_state=42, verbosity=-1, **params)
     m.fit(Xtr, ytr)
     return m.predict_proba(Xval)[:, 1], m
 

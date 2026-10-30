@@ -1,0 +1,12 @@
+target:
+  name: banking_crisis
+
+data:
+  country_column: country
+  year_column: year
+
+validation:
+  n_folds: 6
+
+models:
+  random_state: 42
